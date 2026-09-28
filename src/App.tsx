@@ -37,6 +37,7 @@ import { PurchaseReturnsView } from './components/purchasing/PurchaseReturnsView
 import { CustomerReturnsView } from './components/returns/CustomerReturnsView';
 import { CustomersView } from './components/customers/CustomersView';
 import { CustomerProfileView } from './components/customers/CustomerProfileView';
+import { CustomerItemHistoryView } from './components/customers/CustomerItemHistoryView';
 import { SupplierProfileView } from './components/purchasing/SupplierProfileView';
 import { JournalView } from './components/accounting/JournalView';
 import { DailyCashTillView } from './components/accounting/DailyCashTillView';
@@ -222,6 +223,8 @@ const MainLayout: React.FC = () => {
         return <PayableReceivableView />;
       case '/customers/profile':
         return <CustomerProfileView />;
+      case '/customers/item-history':
+        return <CustomerItemHistoryView />;
       case '/purchasing/suppliers/profile':
         return <SupplierProfileView />;
       case '/pricing':

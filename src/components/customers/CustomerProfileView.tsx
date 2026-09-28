@@ -16,6 +16,7 @@ export const CustomerProfileView: React.FC = () => {
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [customer360, setCustomer360] = useState<Customer360Data | null>(null);
+  const [topProducts, setTopProducts] = useState<Array<{ product_id: string; sku: string; product_name: string; units_bought: number; net_value: number }>>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [savingType, setSavingType] = useState<boolean>(false);
@@ -29,9 +30,10 @@ export const CustomerProfileView: React.FC = () => {
       const headers: Record<string, string> = {};
       if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
 
-      const [custRes, c360Res] = await Promise.all([
+      const [custRes, c360Res, histRes] = await Promise.all([
         fetch(`/api/customers/${customerId}`, { headers }),
-        fetch(`/api/crm/customers/${customerId}/360`, { headers }).catch(() => null)
+        fetch(`/api/crm/customers/${customerId}/360`, { headers }).catch(() => null),
+        fetch(`/api/customers/${customerId}/item-history?view=products&page_size=5`, { headers }).catch(() => null),
       ]);
 
       if (!custRes.ok) throw new Error('Customer not found');
@@ -41,6 +43,11 @@ export const CustomerProfileView: React.FC = () => {
       if (c360Res && c360Res.ok) {
         const c360Data = await c360Res.json();
         setCustomer360(c360Data);
+      }
+
+      if (histRes && histRes.ok) {
+        const histData = await histRes.json();
+        setTopProducts(histData.products || []);
       }
     } catch (err: any) {
       setError(err.message || 'Error loading customer profile');
@@ -159,6 +166,12 @@ export const CustomerProfileView: React.FC = () => {
         title={customer.name}
         actions={
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActivePath(`/customers/item-history?customer_id=${encodeURIComponent(customer.id)}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)] cursor-pointer shadow-xs"
+            >
+              Item history
+            </button>
             <button
               onClick={() => setActivePath('/customers')}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)] cursor-pointer shadow-xs"
@@ -335,43 +348,38 @@ export const CustomerProfileView: React.FC = () => {
           {/* Wholesale Products Purchased vs Retail Preferences */}
           {effectiveType === 'wholesale' ? (
             <div className="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
-              <div className="text-xs font-bold text-[var(--text)]">Products Purchased</div>
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold text-[var(--text)]">Products purchased</div>
+                <button
+                  onClick={() => setActivePath(`/customers/item-history?customer_id=${encodeURIComponent(customer.id)}&view=products`)}
+                  className="text-xs font-medium text-[var(--accent)] hover:underline cursor-pointer"
+                >
+                  View all
+                </button>
+              </div>
               <div className="text-xs text-[var(--text-muted)] font-mono">
-                {/* Factual purchase history aggregated from order lines */}
-                {(() => {
-                  const itemMap: Record<string, { name: string; sku: string; units: number; value: number }> = {};
-                  nonCancelledOrders.forEach(o => {
-                    o.items.forEach(it => {
-                      if (!itemMap[it.product_id]) {
-                        itemMap[it.product_id] = { name: it.product_name, sku: it.sku, units: 0, value: 0 };
-                      }
-                      itemMap[it.product_id].units += it.quantity;
-                      itemMap[it.product_id].value += it.total_price;
-                    });
-                  });
-                  const sortedItems = Object.values(itemMap).sort((a, b) => b.units - a.units);
-                  if (sortedItems.length === 0) return <div>No purchase history yet.</div>;
-                  return (
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="text-[10px] text-[var(--text-muted)] uppercase border-b border-[var(--border)]">
-                          <th className="py-1.5 px-2">SKU / Product</th>
-                          <th className="py-1.5 px-2 text-right">Units</th>
-                          <th className="py-1.5 px-2 text-right">Total Value</th>
+                {topProducts.length === 0 ? (
+                  <div>No purchase history yet.</div>
+                ) : (
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="text-[10px] text-[var(--text-muted)] uppercase border-b border-[var(--border)]">
+                        <th className="py-1.5 px-2">SKU / Product</th>
+                        <th className="py-1.5 px-2 text-right">Units</th>
+                        <th className="py-1.5 px-2 text-right">Total Value</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)] font-mono">
+                      {topProducts.slice(0, 5).map((si, idx) => (
+                        <tr key={idx}>
+                          <td className="py-1.5 px-2">[{si.sku}] {si.product_name}</td>
+                          <td className="py-1.5 px-2 text-right font-bold">{si.units_bought}</td>
+                          <td className="py-1.5 px-2 text-right font-bold">৳{si.net_value.toLocaleString()}</td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[var(--border)] font-mono">
-                        {sortedItems.map((si, idx) => (
-                          <tr key={idx}>
-                            <td className="py-1.5 px-2">[{si.sku}] {si.name}</td>
-                            <td className="py-1.5 px-2 text-right font-bold">{si.units}</td>
-                            <td className="py-1.5 px-2 text-right font-bold">৳{si.value.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  );
-                })()}
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           ) : (

@@ -1866,6 +1866,281 @@ async function startServer() {
     }
   });
 
+  app.get('/api/customers/:id/item-history', (req, res) => {
+    const cust = db.customers.get(req.params.id);
+    if (!cust) return res.status(404).json({ error: 'Customer not found' });
+
+    const normPhone = cust.phone ? cust.phone.replace(/\D/g, '') : '';
+    const effType = db.getEffectiveCustomerType(cust);
+
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.max(1, Number(req.query.page_size) || 25);
+    const dateFrom = (req.query.date_from as string) || '';
+    const dateTo = (req.query.date_to as string) || '';
+    const q = (req.query.q as string || req.query.search as string || '').toLowerCase().trim();
+    const productId = (req.query.product_id as string) || '';
+    const statusFilter = (req.query.status as string) || 'default';
+    const view = (req.query.view as string) || 'lines';
+
+    // 1. Find all matching orders
+    const matchingOrders = Array.from(db.orders.values()).filter(o =>
+      o.customer_id === cust.id || (normPhone && o.customer_phone && o.customer_phone.replace(/\D/g, '') === normPhone)
+    );
+
+    // 2. Find all matching customer returns
+    const matchingReturns = Array.from(db.customerReturns.values()).filter(r =>
+      r.customer_id === cust.id || (normPhone && r.customer_phone && r.customer_phone.replace(/\D/g, '') === normPhone)
+    );
+
+    // Check mixed sale types
+    const nonCancelledOrders = matchingOrders.filter(o => o.status !== 'cancelled');
+    const hasRetail = nonCancelledOrders.some(o => !o.sale_type || o.sale_type === 'retail');
+    const hasWholesale = nonCancelledOrders.some(o => o.sale_type === 'wholesale');
+    const hasMixedSaleTypes = hasRetail && hasWholesale;
+
+    // Filter orders by status
+    let filteredOrders = matchingOrders;
+    if (statusFilter === 'all') {
+      // all orders included
+    } else if (statusFilter === 'delivered') {
+      filteredOrders = matchingOrders.filter(o => o.status === 'delivered');
+    } else if (statusFilter === 'in_progress') {
+      filteredOrders = matchingOrders.filter(o =>
+        ['pending', 'confirmed', 'processing', 'packed', 'dispatched', 'in_transit'].includes(o.status)
+      );
+    } else if (statusFilter === 'cancelled') {
+      filteredOrders = matchingOrders.filter(o => o.status === 'cancelled');
+    } else if (statusFilter === 'rto') {
+      filteredOrders = matchingOrders.filter(o => o.status === 'returned');
+    } else {
+      // default: exclude cancelled and RTO orders
+      filteredOrders = matchingOrders.filter(o => o.status !== 'cancelled' && o.status !== 'returned');
+    }
+
+    // Filter returns by status
+    let filteredReturns = matchingReturns;
+    if (statusFilter === 'delivered' || statusFilter === 'in_progress' || statusFilter === 'cancelled') {
+      filteredReturns = [];
+    } else if (statusFilter === 'rto') {
+      filteredReturns = matchingReturns.filter(r => r.return_type === 'courier_rto');
+    }
+
+    // Build raw line items
+    const rawLines: Array<{
+      id: string;
+      sale_date: string;
+      invoice_number: string;
+      order_id: string;
+      sku: string;
+      product_name: string;
+      product_id: string;
+      quantity: number;
+      unit_price: number;
+      discount_amount: number;
+      total_price: number;
+      status: string;
+      channel: string;
+      sale_type: string;
+      batch_code: string;
+      is_return: boolean;
+    }> = [];
+
+    // Order items
+    for (const o of filteredOrders) {
+      for (const item of (o.items || [])) {
+        rawLines.push({
+          id: `ord_${o.id}_${item.id || item.product_id}`,
+          sale_date: o.created_at,
+          invoice_number: o.invoice_number || `INV-${o.id}`,
+          order_id: o.id,
+          sku: item.sku || '',
+          product_name: item.product_name || '',
+          product_id: item.product_id || '',
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          discount_amount: item.discount_amount || 0,
+          total_price: item.total_price,
+          status: o.status,
+          channel: o.channel || 'direct',
+          sale_type: o.sale_type || 'retail',
+          batch_code: item.batch_code || item.allocations?.[0]?.batch_code || '',
+          is_return: false,
+        });
+      }
+    }
+
+    // Return items
+    for (const r of filteredReturns) {
+      for (const item of (r.items || [])) {
+        rawLines.push({
+          id: `ret_${r.id}_${item.id || item.product_id}`,
+          sale_date: r.created_at,
+          invoice_number: r.invoice_number || '',
+          order_id: r.order_id || '',
+          sku: item.sku || '',
+          product_name: item.product_name || '',
+          product_id: item.product_id || '',
+          quantity: -Math.abs(item.quantity),
+          unit_price: item.unit_price,
+          discount_amount: 0,
+          total_price: -Math.abs(item.unit_price * item.quantity),
+          status: 'Returned',
+          channel: 'direct',
+          sale_type: 'retail',
+          batch_code: '',
+          is_return: true,
+        });
+      }
+    }
+
+    // Apply date range, query, and product filters
+    const filteredLines = rawLines.filter(row => {
+      const rowDate = row.sale_date ? row.sale_date.slice(0, 10) : '';
+      if (dateFrom && rowDate < dateFrom) return false;
+      if (dateTo && rowDate > dateTo) return false;
+      if (productId && row.product_id !== productId) return false;
+      if (q) {
+        const matches =
+          row.product_name.toLowerCase().includes(q) ||
+          row.sku.toLowerCase().includes(q) ||
+          row.invoice_number.toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+
+    // Sort newest first
+    filteredLines.sort((a, b) => (b.sale_date || '').localeCompare(a.sale_date || ''));
+
+    // Compute summary over the full filtered set
+    let netUnits = 0;
+    let netValue = 0;
+    let returnedUnits = 0;
+    const distinctProductIds = new Set<string>();
+    let firstPurchaseDate = '';
+    let lastPurchaseDate = '';
+
+    for (const r of filteredLines) {
+      netUnits += r.quantity;
+      netValue += r.total_price;
+      if (r.is_return || r.quantity < 0) {
+        returnedUnits += Math.abs(r.quantity);
+      }
+      if (r.product_id) {
+        distinctProductIds.add(r.product_id);
+      }
+      const d = r.sale_date ? r.sale_date.slice(0, 10) : '';
+      if (d) {
+        if (!firstPurchaseDate || d < firstPurchaseDate) firstPurchaseDate = d;
+        if (!lastPurchaseDate || d > lastPurchaseDate) lastPurchaseDate = d;
+      }
+    }
+
+    // Compute By Product aggregation
+    const productMap = new Map<string, {
+      product_id: string;
+      sku: string;
+      product_name: string;
+      times_bought: Set<string>;
+      units_bought: number;
+      units_returned: number;
+      net_units: number;
+      net_value: number;
+      total_positive_revenue: number;
+      total_positive_units: number;
+      last_unit_price: number;
+      first_bought: string;
+      last_bought: string;
+    }>();
+
+    for (const r of filteredLines) {
+      const pid = r.product_id || r.sku;
+      if (!productMap.has(pid)) {
+        productMap.set(pid, {
+          product_id: r.product_id,
+          sku: r.sku,
+          product_name: r.product_name,
+          times_bought: new Set(),
+          units_bought: 0,
+          units_returned: 0,
+          net_units: 0,
+          net_value: 0,
+          total_positive_revenue: 0,
+          total_positive_units: 0,
+          last_unit_price: r.unit_price,
+          first_bought: r.sale_date ? r.sale_date.slice(0, 10) : '',
+          last_bought: r.sale_date ? r.sale_date.slice(0, 10) : '',
+        });
+      }
+      const entry = productMap.get(pid)!;
+      if (!r.is_return && r.quantity > 0) {
+        if (r.order_id) entry.times_bought.add(r.order_id);
+        entry.units_bought += r.quantity;
+        entry.total_positive_revenue += r.total_price;
+        entry.total_positive_units += r.quantity;
+        entry.last_unit_price = r.unit_price;
+      } else {
+        entry.units_returned += Math.abs(r.quantity);
+      }
+      entry.net_units += r.quantity;
+      entry.net_value += r.total_price;
+
+      const dateStr = r.sale_date ? r.sale_date.slice(0, 10) : '';
+      if (dateStr) {
+        if (!entry.first_bought || dateStr < entry.first_bought) entry.first_bought = dateStr;
+        if (!entry.last_bought || dateStr > entry.last_bought) entry.last_bought = dateStr;
+      }
+    }
+
+    const allProductRows = Array.from(productMap.values()).map(p => ({
+      product_id: p.product_id,
+      sku: p.sku,
+      product_name: p.product_name,
+      times_bought: p.times_bought.size,
+      units_bought: p.units_bought,
+      units_returned: p.units_returned,
+      net_units: p.net_units,
+      net_value: p.net_value,
+      average_unit_price: p.total_positive_units > 0 ? Math.round(p.total_positive_revenue / p.total_positive_units) : p.last_unit_price,
+      last_unit_price: p.last_unit_price,
+      first_bought: p.first_bought || '-',
+      last_bought: p.last_bought || '-',
+    })).sort((a, b) => b.net_units - a.net_units);
+
+    // Pagination based on view
+    const isProductView = view === 'products';
+    const totalCount = isProductView ? allProductRows.length : filteredLines.length;
+    const totalPages = Math.ceil(totalCount / pageSize) || 1;
+    const paginatedLines = isProductView ? [] : filteredLines.slice((page - 1) * pageSize, page * pageSize);
+    const paginatedProducts = isProductView ? allProductRows.slice((page - 1) * pageSize, page * pageSize) : allProductRows;
+
+    res.json({
+      customer: {
+        id: cust.id,
+        name: cust.name,
+        phone: cust.phone,
+        effective_type: effType,
+      },
+      summary: {
+        net_units: netUnits,
+        distinct_products: distinctProductIds.size,
+        line_items: filteredLines.length,
+        net_value: netValue,
+        returned_units: returnedUnits,
+        first_purchase_date: firstPurchaseDate || '-',
+        last_purchase_date: lastPurchaseDate || '-',
+        has_mixed_sale_types: hasMixedSaleTypes,
+      },
+      view: isProductView ? 'products' : 'lines',
+      page,
+      page_size: pageSize,
+      total_count: totalCount,
+      total_pages: totalPages,
+      lines: paginatedLines,
+      products: isProductView ? paginatedProducts : allProductRows,
+    });
+  });
+
   // 7. Phase 3 Purchasing: Suppliers, Purchase Orders, and Purchase Returns (Section 13, 14, 15, 40.3)
   app.get('/api/suppliers', (req, res) => {
     res.json(Array.from(db.suppliers.values()).sort((a, b) => a.name.localeCompare(b.name)));
