@@ -1,0 +1,8 @@
+{
+  "name": "Remix x mirage-perfume-erp",
+  "description": "Imported from GitHub: graphicdeisgnerogd-lang/mirage-perfume-erp",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mirage Perfume ERP</title>
+    <meta name="description" content="Internal ERP for Mirage Perfume — inventory, stock reservation, Messenger & walk-in orders, accounting journal, barcode management, and role-based access." />
+    <meta property="og:title" content="Mirage Perfume ERP" />
+    <meta property="og:description" content="Internal ERP for Mirage Perfume — inventory, stock reservation, Messenger & walk-in orders, accounting journal, barcode management, and role-based access." />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Open+Sans:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        try {
+          var _origFetch = window.fetch;
+          var _currentFetch = _origFetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return _currentFetch;
+            },
+            set: function(newFetch) {
+              _currentFetch = newFetch;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          try {
+            var _protoFetch = Window.prototype.fetch;
+            Object.defineProperty(Window.prototype, 'fetch', {
+              get: function() {
+                return _currentFetch || _protoFetch;
+              },
+              set: function(newFetch) {
+                _currentFetch = newFetch;
+              },
+              configurable: true,
+              enumerable: true
+            });
+          } catch (err) {}
+        }
+      })();
+    </script>
+  </head>
+  <body class="bg-[var(--bg)] text-[var(--text)] antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
