@@ -517,6 +517,43 @@ export class MirageDB {
     return customer;
   }
 
+  public getEffectiveCustomerType(customer: Customer, orders?: Order[]): 'retail' | 'wholesale' {
+    if (customer.customer_type) return customer.customer_type;
+    const allOrders = orders || Array.from(this.orders.values());
+    const custOrders = allOrders.filter(
+      o => o.customer_id === customer.id || (o.customer_phone && customer.phone && o.customer_phone.replace(/\D/g, '') === customer.phone.replace(/\D/g, ''))
+    );
+    const nonCancelled = custOrders.filter(o => o.status !== 'cancelled');
+    if (nonCancelled.length === 0) return 'retail';
+    const wholesaleCount = nonCancelled.filter(o => o.sale_type === 'wholesale').length;
+    return (wholesaleCount / nonCancelled.length >= 0.5) ? 'wholesale' : 'retail';
+  }
+
+  public computeWholesaleReorderStatus(customer: Customer, orders?: Order[]): string {
+    const allOrders = orders || Array.from(this.orders.values());
+    const custOrders = allOrders.filter(
+      o => (o.customer_id === customer.id || (o.customer_phone && customer.phone && o.customer_phone.replace(/\D/g, '') === customer.phone.replace(/\D/g, ''))) && o.status !== 'cancelled'
+    ).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    if (custOrders.length < 3) return '-';
+
+    let totalDiffDays = 0;
+    for (let i = 0; i < custOrders.length - 1; i++) {
+      const d1 = new Date(custOrders[i].created_at).getTime();
+      const d2 = new Date(custOrders[i+1].created_at).getTime();
+      totalDiffDays += Math.max(0, (d2 - d1) / (1000 * 60 * 60 * 24));
+    }
+    const avgInterval = totalDiffDays / (custOrders.length - 1);
+    if (avgInterval <= 0) return 'On cycle';
+
+    const lastOrderDate = new Date(custOrders[custOrders.length - 1].created_at).getTime();
+    const daysSinceLast = Math.max(0, (Date.now() - lastOrderDate) / (1000 * 60 * 60 * 24));
+
+    if (daysSinceLast <= avgInterval) return 'On cycle';
+    if (daysSinceLast <= 1.5 * avgInterval) return 'Due';
+    return 'Overdue';
+  }
+
   public expandBundles(items: { product_id: string; quantity: number }[]): { product_id: string; quantity: number; is_component: boolean }[] {
     const result: { product_id: string; quantity: number; is_component: boolean }[] = [];
     for (const item of items) {

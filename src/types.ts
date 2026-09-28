@@ -286,6 +286,8 @@ export interface Customer {
   id: string;
   name: string;
   phone: string; // Normalized: 01XXXXXXXXX
+  customer_type?: 'retail' | 'wholesale';
+  business_name?: string;
   order_count: number;
   total_spent: number;
   risk_flag: boolean; // Flagged if multiple RTOs / cancelled fraud orders

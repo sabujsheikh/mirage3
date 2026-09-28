@@ -37,11 +37,14 @@ export const NAV_CONFIG: NavItem[] = [
     ],
   },
   {
-    id: 'customers',
-    label: 'Customers',
+    id: 'contacts',
+    label: 'Contacts',
     icon: 'Users',
-    path: '/customers',
     requiresTier: ['owner', 'general_manager', 'manager', 'packing_staff'],
+    children: [
+      { label: 'Customers', path: '/customers' },
+      { label: 'Suppliers', path: '/purchasing/suppliers' },
+    ],
   },
   {
     id: 'packing',
@@ -72,7 +75,6 @@ export const NAV_CONFIG: NavItem[] = [
     icon: 'Truck',
     requiresTier: ['owner', 'general_manager', 'manager'],
     children: [
-      { label: 'Suppliers', path: '/purchasing/suppliers' },
       { label: 'Purchase Orders', path: '/purchasing/orders' },
       { label: 'Purchase Returns', path: '/purchasing/returns' },
     ],
@@ -86,21 +88,6 @@ export const NAV_CONFIG: NavItem[] = [
       { label: 'Booking History', path: '/courier/bookings' },
       { label: 'Live Tracking', path: '/courier/tracking' },
       { label: 'RTO Tracking', path: '/courier/rto' },
-    ],
-  },
-  {
-    id: 'crm',
-    label: 'CRM & Relations',
-    icon: 'HeartHandshake',
-    requiresTier: ['owner', 'general_manager', 'manager'],
-    children: [
-      { label: 'CRM Dashboard', path: '/crm/dashboard' },
-      { label: 'Leads & Inquiries', path: '/crm/leads' },
-      { label: 'Follow-ups & Tasks', path: '/crm/tasks' },
-      { label: 'Customer 360', path: '/crm/customers' },
-      { label: 'Segments & Tags', path: '/crm/segments' },
-      { label: 'Interactions & Timeline', path: '/crm/interactions' },
-      { label: 'Automations', path: '/crm/automations' },
     ],
   },
   {

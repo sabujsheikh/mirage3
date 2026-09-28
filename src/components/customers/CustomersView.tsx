@@ -1,289 +1,354 @@
-import React, { useMemo, useState } from "react";
-import {
-  Search,
-  Star,
-  Phone,
-  MapPin,
-  ShoppingBag,
-  AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  RotateCcw,
-  TrendingUp,
-  User,
-  MessageSquare,
-  Package,
-  Truck,
-  Store,
-  ChevronRight,
-  Plus,
-  FlaskConical,
-} from "lucide-react";
-import { useApp } from "../../context/AppContext";
-import { Customer, Order } from "../../types";
-import { Modal } from "../common/Modal";
-import { PageHeader } from "../common/PageHeader";
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { PageHeader } from '../common/PageHeader';
+import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
+import { Customer, Order } from '../../types';
+import { Search, Star, ChevronLeft, ChevronRight, RefreshCw, Filter, ArrowUpDown } from 'lucide-react';
 
-// ─── Star rating component ────────────────────────────────────────────────────
-const StarRating: React.FC<{
-  rating: number;
-  onChange?: (r: number) => void;
-  size?: "sm" | "md";
-}> = ({ rating, onChange, size = "md" }) => {
-  const [hovered, setHovered] = useState<number>(0);
-  const sz = size === "sm" ? "w-3.5 h-3.5" : "w-5 h-5";
-  return (
-    <div className="flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onChange && onChange(n)}
-          onMouseEnter={() => onChange && setHovered(n)}
-          onMouseLeave={() => onChange && setHovered(0)}
-          className={`${onChange ? "cursor-pointer" : "cursor-default"} transition-colors`}
-          style={{ background: "none", border: "none", padding: 0 }}
-        >
-          <Star
-            className={`${sz} ${
-              n <= (hovered || Math.round(rating))
-                ? "fill-[var(--accent-secondary)] text-[var(--accent-secondary)]"
-                : "text-[var(--border)] fill-[var(--border)]"
-            }`}
-          />
-        </button>
-      ))}
-      <span className="ml-1 text-[11px] font-bold font-num text-[var(--text-secondary)]">
-        {rating.toFixed(1)}
-      </span>
-    </div>
-  );
-};
-
-// ─── Status pill helper ───────────────────────────────────────────────────────
-const Pill: React.FC<{ color: "green" | "amber" | "red" | "teal" | "gray"; children: React.ReactNode }> = ({ color, children }) => {
-  const cls = {
-    green: "pill-green",
-    amber: "pill-amber",
-    red: "pill-red",
-    teal: "pill-teal",
-    gray: "pill-gray",
-  }[color];
-  return (
-    <span className={`${cls} inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold border`}>
-      {children}
-    </span>
-  );
-};
-
-// ─── Main component ───────────────────────────────────────────────────────────
 export const CustomersView: React.FC = () => {
-  const { customers, orders } = useApp();
+  const { setActivePath, orders: allOrders } = useApp();
+  const { sessionToken } = useAuth();
 
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [riskFilter, setRiskFilter] = useState<"all" | "risk" | "reliable">("all");
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [activeTab, setActiveTab] = useState<"summary" | "history" | "addresses" | "notes" | "risk">("summary");
+  const [activeTypeTab, setActiveTypeTab] = useState<'all' | 'retail' | 'wholesale'>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [cityFilter, setCityFilter] = useState<string>('all');
+  const [ratingFilter, setRatingFilter] = useState<string>('all');
+  const [tierFilter, setTierFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
 
-  // Local session ratings \u2014 in a real impl these would be persisted via API
-  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // ── Compute per-customer derived stats ─────────────────────────────────────
-  const getStats = (cust: Customer) => {
-    const custOrders = orders.filter(
-      (o) =>
-        o.customer_id === cust.id ||
-        o.customer_phone.replace(/\D/g, "") === cust.phone.replace(/\D/g, "")
+  const fetchCustomers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(currentPage));
+      params.set('page_size', String(pageSize));
+      if (activeTypeTab !== 'all') params.set('type', activeTypeTab);
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
+      if (cityFilter !== 'all') params.set('city', cityFilter);
+      if (ratingFilter !== 'all') params.set('rating', ratingFilter);
+
+      const headers: Record<string, string> = {};
+      if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
+
+      const res = await fetch(`/api/customers?${params.toString()}`, { headers });
+      if (!res.ok) throw new Error('Failed to load customers');
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setCustomers(data);
+      } else {
+        setCustomers(data.items || []);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Error loading customers');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeTypeTab, searchQuery, cityFilter, ratingFilter, currentPage, pageSize, sessionToken]);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, [fetchCustomers]);
+
+  // Compute helper stats per customer using allOrders
+  const getCustMetrics = (c: Customer) => {
+    const custOrders = allOrders.filter(
+      o => o.customer_id === c.id || (o.customer_phone && c.phone && o.customer_phone.replace(/\D/g, '') === c.phone.replace(/\D/g, ''))
     );
-    const delivered = custOrders.filter((o) => o.status === "delivered").length;
-    const cancelled = custOrders.filter((o) => o.status === "cancelled").length;
-    const rto = custOrders.filter((o) => o.status === "returned").length;
-    const pending = custOrders.filter((o) =>
-      ["confirmed", "packed", "dispatched"].includes(o.status)
-    ).length;
-    const total = custOrders.length || cust.order_count || 1;
-    const outcomes = delivered + cancelled + rto;
-    const successRate = outcomes > 0 ? Math.round((delivered / outcomes) * 100) : null;
-    const totalSpent =
-      custOrders
-        .filter((o) => o.status !== "cancelled")
-        .reduce((s, o) => s + o.total, 0) || cust.total_spent;
-    const avgOrderValue =
-      delivered > 0 ? Math.round(totalSpent / Math.max(1, delivered)) : 0;
-    const messengerOrders = custOrders.filter((o) => o.channel === "messenger").length;
-    const walkinOrders = custOrders.filter((o) => o.channel === "walk-in").length;
-    const preferredChannel =
-      messengerOrders >= walkinOrders ? "Messenger" : "Walk-in Showroom";
-    const steadfastOrders = custOrders.filter(
-      (o) => o.fulfillment_method === "steadfast"
-    ).length;
-    const inHouseOrders = custOrders.filter(
-      (o) => o.fulfillment_method === "in_house"
-    ).length;
-    const preferredFulfillment =
-      steadfastOrders >= inHouseOrders ? "Steadfast COD" : "In-house Delivery";
+    const nonCancelled = custOrders.filter(o => o.status !== 'cancelled');
+    const delivered = nonCancelled.filter(o => o.status === 'delivered').length;
+    const totalSpent = nonCancelled.reduce((s, o) => s + o.total, 0);
+    const totalUnits = nonCancelled.reduce((s, o) => s + o.items.reduce((sum, i) => sum + i.quantity, 0), 0);
+    const successRate = nonCancelled.length > 0 ? Math.round((delivered / nonCancelled.length) * 100) : 0;
+    const outstandingDue = nonCancelled.reduce((s, o) => {
+      const paid = (o.payments || []).filter(p => p.status === 'completed').reduce((sum, p) => sum + p.amount, 0);
+      return s + Math.max(0, o.total - paid);
+    }, 0);
+
+    const wholesaleCount = nonCancelled.filter(o => o.sale_type === 'wholesale').length;
+    const computedType = nonCancelled.length > 0 && (wholesaleCount / nonCancelled.length >= 0.5) ? 'wholesale' : 'retail';
+    const effType = c.customer_type || computedType;
+
+    const lastOrder = nonCancelled.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+    const daysSinceLast = lastOrder ? Math.floor((Date.now() - new Date(lastOrder.created_at).getTime()) / (1000 * 60 * 60 * 24)) : '-';
+
+    // Reorder status for wholesale
+    let reorderStatus = '-';
+    if (nonCancelled.length >= 3) {
+      const sorted = [...nonCancelled].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      let diff = 0;
+      for (let i = 0; i < sorted.length - 1; i++) {
+        diff += Math.max(0, (new Date(sorted[i+1].created_at).getTime() - new Date(sorted[i].created_at).getTime()) / (1000 * 60 * 60 * 24));
+      }
+      const avgInterval = diff / (sorted.length - 1);
+      if (avgInterval > 0) {
+        const daysLast = typeof daysSinceLast === 'number' ? daysSinceLast : 0;
+        if (daysLast <= avgInterval) reorderStatus = 'On cycle';
+        else if (daysLast <= 1.5 * avgInterval) reorderStatus = 'Due';
+        else reorderStatus = 'Overdue';
+      }
+    }
+
     return {
       custOrders,
-      total,
+      nonCancelled,
       delivered,
-      cancelled,
-      rto,
-      pending,
-      successRate,
       totalSpent,
-      avgOrderValue,
-      preferredChannel,
-      preferredFulfillment,
-      isRisk:
-        cust.risk_flag ||
-        (rto + cancelled >= 2 && (successRate ?? 100) < 50),
+      totalUnits,
+      successRate,
+      outstandingDue,
+      effType,
+      lastOrderDate: lastOrder ? lastOrder.created_at.slice(0, 10) : '-',
+      daysSinceLast,
+      reorderStatus,
     };
   };
 
+  // Filtered list client-side if needed or server side
   const filteredCustomers = useMemo(() => {
-    return customers.filter((c) => {
-      if (riskFilter === "risk" && !c.risk_flag) return false;
-      if (riskFilter === "reliable" && c.risk_flag) return false;
+    return customers.filter(c => {
+      const metrics = getCustMetrics(c);
+      if (activeTypeTab !== 'all' && metrics.effType !== activeTypeTab) return false;
+      if (cityFilter !== 'all' && c.city !== cityFilter) return false;
+      if (ratingFilter !== 'all' && Math.round(c.rating || 3) !== Number(ratingFilter)) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const match =
-          c.name.toLowerCase().includes(q) ||
-          c.phone.includes(q) ||
-          c.addresses.some((a) => a.address_text.toLowerCase().includes(q));
-        if (!match) return false;
+        const hay = [c.name, c.phone, c.business_name, c.city, ...(c.addresses || []).map(a => a.address_text)].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [customers, searchQuery, riskFilter]);
+  }, [customers, activeTypeTab, searchQuery, cityFilter, ratingFilter, allOrders]);
 
-  const openCustomer = (c: Customer) => {
-    setSelectedCustomer(c);
-    setActiveTab("summary");
-  };
+  // Data strip summaries per view
+  const retailCustomersList = customers.filter(c => getCustMetrics(c).effType === 'retail');
+  const wholesaleCustomersList = customers.filter(c => getCustMetrics(c).effType === 'wholesale');
 
-  const selectedStats = selectedCustomer ? getStats(selectedCustomer) : null;
-  const selectedRating =
-    selectedCustomer
-      ? (ratings[selectedCustomer.id] ??
-          (selectedCustomer.risk_flag
-            ? 2.5
-            : (selectedStats?.successRate ?? 80) >= 90
-            ? 5
-            : (selectedStats?.successRate ?? 80) >= 70
-            ? 4
-            : 3))
-      : 0;
+  const retailReturningPct = retailCustomersList.length > 0
+    ? Math.round((retailCustomersList.filter(c => getCustMetrics(c).nonCancelled.length >= 2).length / retailCustomersList.length) * 100)
+    : 0;
+  const retailAvgSpend = retailCustomersList.length > 0
+    ? Math.round(retailCustomersList.reduce((s, c) => s + getCustMetrics(c).totalSpent, 0) / retailCustomersList.length)
+    : 0;
 
-  const tabs: { id: "summary" | "history" | "addresses" | "notes" | "risk"; label: string }[] = [
-    { id: "summary", label: "Summary" },
-    { id: "history", label: `Purchase History (${selectedStats?.custOrders.length ?? 0})` },
-    { id: "addresses", label: "Addresses" },
-    { id: "notes", label: "Notes & Testers" },
-    { id: "risk", label: "Risk History" },
-  ];
+  const wholesaleTotalPurchased = wholesaleCustomersList.reduce((s, c) => s + getCustMetrics(c).totalSpent, 0);
+  const wholesaleTotalUnits = wholesaleCustomersList.reduce((s, c) => s + getCustMetrics(c).totalUnits, 0);
+  const wholesaleTotalDue = wholesaleCustomersList.reduce((s, c) => s + getCustMetrics(c).outstandingDue, 0);
+  const wholesaleReorderDueCount = wholesaleCustomersList.filter(c => {
+    const st = getCustMetrics(c).reorderStatus;
+    return st === 'Due' || st === 'Overdue';
+  }).length;
+
+  const allTotalDue = customers.reduce((s, c) => s + getCustMetrics(c).outstandingDue, 0);
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-2.5 max-w-7xl mx-auto pb-8">
       <PageHeader
-        eyebrow="Customers"
+        eyebrow="Contacts"
         title="Customers"
-        desc={`${customers.length} registered customers \u00B7 click any row to open full relationship workspace`}
         actions={
-          <button className="erp-btn-primary">
-            <Plus className="w-3.5 h-3.5" />
-            Add Customer
+          <button
+            onClick={fetchCustomers}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)] cursor-pointer shadow-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
           </button>
         }
       />
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            className="erp-input pl-8 w-72"
-            placeholder="Search name, phone, address..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+      {/* Segmented Control Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-[var(--card)] border border-[var(--border)] rounded-lg p-2 shadow-xs">
+        <div className="flex items-center gap-1 bg-[var(--surface-sunken)] p-1 rounded-md">
+          {(['all', 'retail', 'wholesale'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => {
+                setActiveTypeTab(tab);
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1 text-xs font-semibold rounded transition-colors cursor-pointer capitalize ${
+                activeTypeTab === tab
+                  ? 'bg-[var(--card)] text-[var(--text)] shadow-xs'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
-        <select
-          className="erp-select"
-          value={riskFilter}
-          onChange={(e) => setRiskFilter(e.target.value as any)}
-        >
-          <option value="all">All Customers</option>
-          <option value="reliable">Reliable Only</option>
-          <option value="risk">RTO Risk Only</option>
-        </select>
-        <span className="ml-auto text-[11px] text-[var(--text-muted)] font-num">
-          {filteredCustomers.length} results
-        </span>
+
+        {/* Search & Quick Filters */}
+        <div className="flex items-center gap-2 flex-1 max-w-md">
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+            <input
+              type="text"
+              placeholder="Search name, phone, business..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-2.5 py-1 text-xs rounded border border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--text)] focus:outline-none"
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Dense Table */}
-      <div className="dense-table-container">
-        <div className="overflow-x-auto">
-          <table className="dense-table">
-            <thead>
-              <tr>
-                <th>Customer</th>
-                <th>Phone</th>
-                <th className="text-center">Orders</th>
-                <th className="text-center">Delivered</th>
-                <th className="text-center">Success Rate</th>
-                <th>Rating</th>
-                <th className="text-right">Lifetime Spend</th>
+      {/* Data Strip (reflects current type selection) */}
+      {activeTypeTab === 'retail' && (
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-md px-3 py-2 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Retail Customers:</span>
+            <span className="font-bold text-[var(--text)]">{retailCustomersList.length}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Returning Rate:</span>
+            <span className="font-bold text-[var(--text)]">{retailReturningPct}%</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Average Lifetime Spend:</span>
+            <span className="font-bold text-[var(--text)]">৳{retailAvgSpend.toLocaleString()}</span>
+          </div>
+        </div>
+      )}
+
+      {activeTypeTab === 'wholesale' && (
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-md px-3 py-2 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Wholesale Customers:</span>
+            <span className="font-bold text-[var(--text)]">{wholesaleCustomersList.length}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Total Purchased:</span>
+            <span className="font-bold text-[var(--text)]">৳{wholesaleTotalPurchased.toLocaleString()}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Total Units:</span>
+            <span className="font-bold text-[var(--text)]">{wholesaleTotalUnits}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Total Outstanding Due:</span>
+            <span className="font-bold text-[var(--negative)]">৳{wholesaleTotalDue.toLocaleString()}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Reorder Due Count:</span>
+            <span className="font-bold text-[var(--accent-secondary)]">{wholesaleReorderDueCount}</span>
+          </div>
+        </div>
+      )}
+
+      {activeTypeTab === 'all' && (
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-md px-3 py-2 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Retail Customers:</span>
+            <span className="font-bold text-[var(--text)]">{retailCustomersList.length}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Wholesale Customers:</span>
+            <span className="font-bold text-[var(--text)]">{wholesaleCustomersList.length}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Avg Retail Spend:</span>
+            <span className="font-bold text-[var(--text)]">৳{retailAvgSpend.toLocaleString()}</span>
+          </div>
+          <div className="h-3 w-px bg-[var(--border)] hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--text-muted)] text-[11px] font-sans">Total Outstanding Due:</span>
+            <span className="font-bold text-[var(--negative)]">৳{allTotalDue.toLocaleString()}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Table Container */}
+      <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-xs overflow-hidden">
+        <div className="overflow-x-auto max-h-[calc(100vh-260px)] relative">
+          <table className="w-full text-left border-collapse text-xs font-mono">
+            <thead className="sticky top-0 z-20 bg-[var(--surface-sunken)] shadow-xs">
+              <tr className="border-b border-[var(--border)] text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+                <th className="sticky left-0 z-30 bg-[var(--surface-sunken)] py-3 px-3 whitespace-nowrap border-r border-[var(--border)]">
+                  Customer
+                </th>
+                {activeTypeTab === 'all' && <th className="py-3 px-3 whitespace-nowrap">Type</th>}
+                <th className="py-3 px-3 whitespace-nowrap">Phone</th>
+                <th className="py-3 px-3 whitespace-nowrap">City</th>
+                {activeTypeTab === 'retail' && <th className="py-3 px-3 whitespace-nowrap">Orders</th>}
+                {activeTypeTab === 'retail' && <th className="py-3 px-3 whitespace-nowrap">Success Rate</th>}
+                {activeTypeTab === 'wholesale' && <th className="py-3 px-3 whitespace-nowrap">Reorder Status</th>}
+                {activeTypeTab === 'wholesale' && <th className="py-3 px-3 text-right whitespace-nowrap">Units</th>}
+                {activeTypeTab === 'wholesale' && <th className="py-3 px-3 text-right whitespace-nowrap">Outstanding Due</th>}
+                {activeTypeTab === 'all' && <th className="py-3 px-3 whitespace-nowrap">Status</th>}
+                <th className="py-3 px-3 whitespace-nowrap">Rating</th>
+                <th className="py-3 px-3 text-right whitespace-nowrap">Total Spent / Purchased</th>
+                <th className="py-3 px-3 whitespace-nowrap">Last Order</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[var(--border)]">
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-[var(--text-muted)]">
-                    No customers found.
-                  </td>
+                  <td colSpan={10} className="py-8 text-center text-[var(--text-muted)]">No customers found.</td>
                 </tr>
               ) : (
-                filteredCustomers.map((cust) => {
-                  const s = getStats(cust);
-                  const rating = ratings[cust.id] ?? (cust.risk_flag ? 2.5 : s.successRate && s.successRate >= 90 ? 5 : s.successRate && s.successRate >= 70 ? 4 : 3);
-                  const rateColor =
-                    s.successRate === null
-                      ? "status-gray"
-                      : s.successRate >= 80
-                      ? "status-green"
-                      : s.successRate >= 60
-                      ? "status-amber"
-                      : "status-red";
+                filteredCustomers.map(c => {
+                  const m = getCustMetrics(c);
                   return (
                     <tr
-                      key={cust.id}
-                      className="dense-table-row-clickable"
-                      onClick={() => openCustomer(cust)}
+                      key={c.id}
+                      onDoubleClick={() => setActivePath(`/customers/profile?customer_id=${c.id}`)}
+                      className="hover:bg-[var(--surface-hover)] cursor-pointer odd:bg-[var(--card)] even:bg-[var(--surface-sunken)]/50"
                     >
-                      <td>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-semibold text-[var(--text)]">{cust.name}</span>
-                          {s.isRisk && <Pill color="red">Risk</Pill>}
-                          {!s.isRisk && s.total >= 5 && <Pill color="teal">Returning</Pill>}
+                      <td className="sticky left-0 z-10 bg-[var(--card)] py-2.5 px-3 font-bold text-[var(--accent)] whitespace-nowrap border-r border-[var(--border)]">
+                        <div>{c.name}</div>
+                        {c.business_name && <div className="text-[10px] text-[var(--text-muted)] font-sans">{c.business_name}</div>}
+                      </td>
+                      {activeTypeTab === 'all' && (
+                        <td className="py-2.5 px-3 uppercase text-[10px] whitespace-nowrap font-bold text-[var(--text-secondary)]">
+                          {m.effType}
+                        </td>
+                      )}
+                      <td className="py-2.5 px-3 whitespace-nowrap">{c.phone}</td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">{c.city || 'Dhaka'}</td>
+                      {activeTypeTab === 'retail' && <td className="py-2.5 px-3 whitespace-nowrap">{m.nonCancelled.length}</td>}
+                      {activeTypeTab === 'retail' && <td className="py-2.5 px-3 whitespace-nowrap font-bold text-emerald-600">{m.successRate}%</td>}
+                      {activeTypeTab === 'wholesale' && (
+                        <td className="py-2.5 px-3 whitespace-nowrap font-bold" style={{ color: m.reorderStatus === 'Overdue' ? 'var(--negative)' : m.reorderStatus === 'Due' ? 'var(--accent-secondary)' : 'inherit' }}>
+                          {m.reorderStatus}
+                        </td>
+                      )}
+                      {activeTypeTab === 'wholesale' && <td className="py-2.5 px-3 text-right whitespace-nowrap">{m.totalUnits}</td>}
+                      {activeTypeTab === 'wholesale' && (
+                        <td className={`py-2.5 px-3 text-right whitespace-nowrap font-bold ${m.outstandingDue > 0 ? 'text-[var(--negative)]' : ''}`}>
+                          ৳{m.outstandingDue.toLocaleString()}
+                        </td>
+                      )}
+                      {activeTypeTab === 'all' && (
+                        <td className="py-2.5 px-3 whitespace-nowrap uppercase text-[10px]">
+                          {m.effType === 'wholesale' ? m.reorderStatus : 'Active'}
+                        </td>
+                      )}
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Star className="w-3.5 h-3.5 fill-[var(--accent-secondary)] text-[var(--accent-secondary)]" />
+                          <span>{(c.rating || 4.5).toFixed(1)}</span>
                         </div>
-                        <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                          {s.total} orders &#183; {s.custOrders.length > 0 ? "history in ERP" : "profile only"}
-                        </div>
                       </td>
-                      <td className="font-num text-[var(--accent)] font-semibold">{cust.phone}</td>
-                      <td className="text-center font-num font-semibold">{s.total}</td>
-                      <td className="text-center font-num font-semibold text-[var(--status-green)]">{s.delivered}</td>
-                      <td className="text-center">
-                        <span className={`font-num font-bold ${rateColor}`}>
-                          {s.successRate !== null ? `${s.successRate}%` : "\u2014"}
-                        </span>
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold">
+                        ৳{m.totalSpent.toLocaleString()}
                       </td>
-                      <td>
-                        <StarRating rating={rating} size="sm" />
-                      </td>
-                      <td className="text-right font-num font-semibold text-[var(--accent)]">
-                        &#2547;{s.totalSpent.toLocaleString()}
+                      <td className="py-2.5 px-3 whitespace-nowrap text-[var(--text-muted)]">
+                        {m.lastOrderDate}
                       </td>
                     </tr>
                   );
@@ -293,303 +358,6 @@ export const CustomersView: React.FC = () => {
           </table>
         </div>
       </div>
-
-      {/* ── Customer Record Workspace Modal ─────────────────────────────────── */}
-      {selectedCustomer && selectedStats && (
-        <Modal
-          open={!!selectedCustomer}
-          onClose={() => setSelectedCustomer(null)}
-          size="2xl"
-          title={
-            <div className="flex items-center gap-2">
-              <User className="w-4 h-4 text-[var(--accent)]" />
-              <span>{selectedCustomer.name}</span>
-              {selectedStats.isRisk && <Pill color="red">RTO Risk</Pill>}
-            </div>
-          }
-          subtitle={`${selectedCustomer.phone} \u00B7 Customer since ${new Date(selectedCustomer.created_at).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`}
-        >
-          {/* Tab nav */}
-          <div className="flex gap-0 border-b border-[var(--border)] mb-4 -mt-1">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                className={`px-3 py-2 text-[11px] font-semibold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                  activeTab === t.id
-                    ? "border-[var(--accent)] text-[var(--accent)]"
-                    : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {/* ── TAB: Summary ─────────────────────────────────────────────── */}
-          {activeTab === "summary" && (
-            <div className="space-y-4">
-              {/* Rating */}
-              <div className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]">
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">
-                    Customer Rating
-                  </div>
-                  <StarRating
-                    rating={selectedRating}
-                    onChange={(r) => setRatings((prev) => ({ ...prev, [selectedCustomer.id]: r }))}
-                    size="md"
-                  />
-                </div>
-                {selectedStats.isRisk && (
-                  <div className="flex items-center gap-1.5 text-[var(--status-red)] text-[11px] font-semibold">
-                    <AlertTriangle className="w-4 h-4" />
-                    High RTO Risk
-                  </div>
-                )}
-              </div>
-
-              {/* Stats grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { label: "Lifetime Spend", value: `\u09F3${selectedStats.totalSpent.toLocaleString()}`, color: "text-[var(--accent)]" },
-                  { label: "Total Orders", value: selectedStats.total, color: "" },
-                  { label: "Delivered", value: selectedStats.delivered, color: "text-[var(--status-green)]" },
-                  { label: "Cancelled", value: selectedStats.cancelled, color: selectedStats.cancelled > 0 ? "text-[var(--status-amber)]" : "" },
-                  { label: "RTO", value: selectedStats.rto, color: selectedStats.rto > 0 ? "text-[var(--status-red)]" : "" },
-                  { label: "Pending", value: selectedStats.pending, color: "text-[var(--status-teal)]" },
-                  { label: "Success Rate", value: selectedStats.successRate !== null ? `${selectedStats.successRate}%` : "\u2014", color: selectedStats.successRate && selectedStats.successRate >= 80 ? "text-[var(--status-green)]" : "text-[var(--status-amber)]" },
-                  { label: "Avg Order Value", value: `\u09F3${selectedStats.avgOrderValue.toLocaleString()}`, color: "" },
-                ].map((s, i) => (
-                  <div key={i} className="p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">
-                      {s.label}
-                    </div>
-                    <div className={`text-base font-bold font-num ${s.color || "text-[var(--text)]"}`}>
-                      {s.value}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Channel & fulfillment */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg border border-[var(--border)]">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Preferred Channel</div>
-                  <div className="flex items-center gap-1.5 text-[12px] font-semibold">
-                    {selectedStats.preferredChannel === "Messenger" ? (
-                      <MessageSquare className="w-3.5 h-3.5 text-[var(--accent)]" />
-                    ) : (
-                      <Store className="w-3.5 h-3.5 text-[var(--accent)]" />
-                    )}
-                    {selectedStats.preferredChannel}
-                  </div>
-                </div>
-                <div className="p-3 rounded-lg border border-[var(--border)]">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Preferred Fulfillment</div>
-                  <div className="flex items-center gap-1.5 text-[12px] font-semibold">
-                    <Truck className="w-3.5 h-3.5 text-[var(--accent)]" />
-                    {selectedStats.preferredFulfillment}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB: Purchase History ─────────────────────────────────────── */}
-          {activeTab === "history" && (
-            <div>
-              {selectedStats.custOrders.length === 0 ? (
-                <div className="text-center py-10 text-[var(--text-muted)] text-sm">
-                  No orders found in the ERP for this customer.
-                </div>
-              ) : (
-                <div className="dense-table-container">
-                  <div className="overflow-x-auto">
-                    <table className="dense-table">
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Order ID</th>
-                          <th>Products</th>
-                          <th className="text-right">Total</th>
-                          <th>Channel</th>
-                          <th>Fulfillment</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...selectedStats.custOrders]
-                          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                          .map((o) => {
-                            const statusColor =
-                              o.status === "delivered"
-                                ? "green"
-                                : o.status === "dispatched"
-                                ? "teal"
-                                : o.status === "cancelled" || o.status === "returned"
-                                ? "red"
-                                : "amber";
-                            return (
-                              <tr key={o.id}>
-                                <td className="font-num text-[var(--text-muted)] whitespace-nowrap">
-                                  {new Date(o.created_at).toLocaleDateString("en-GB", {
-                                    day: "numeric",
-                                    month: "short",
-                                    year: "2-digit",
-                                  })}
-                                </td>
-                                <td className="font-num font-semibold text-[var(--accent)] whitespace-nowrap">
-                                  {o.invoice_number}
-                                </td>
-                                <td>
-                                  {o.items.map((it, idx) => (
-                                    <div key={idx} className="text-[11px] leading-snug">
-                                      <span className="font-semibold">{it.product_name}</span>
-                                      <span className="text-[var(--text-muted)]"> × {it.quantity}</span>
-                                      <span className="font-num text-[var(--text-muted)] ml-1">
-                                        &#2547;{it.unit_price.toLocaleString()}
-                                      </span>
-                                    </div>
-                                  ))}
-                                  {o.delivery_charge > 0 && (
-                                    <div className="text-[10px] text-[var(--text-muted)]">
-                                      + &#2547;{o.delivery_charge} delivery
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="text-right font-num font-bold text-[var(--accent)] whitespace-nowrap">
-                                  &#2547;{o.total.toLocaleString()}
-                                </td>
-                                <td className="capitalize text-[var(--text-muted)]">{o.channel}</td>
-                                <td className="capitalize text-[var(--text-muted)]">
-                                  {o.fulfillment_method?.replace("_", "-") ?? "\u2014"}
-                                </td>
-                                <td>
-                                  <Pill color={statusColor as any}>
-                                    {o.status}
-                                  </Pill>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── TAB: Addresses ───────────────────────────────────────────── */}
-          {activeTab === "addresses" && (
-            <div className="space-y-2">
-              {selectedCustomer.addresses.length === 0 ? (
-                <div className="text-center py-8 text-[var(--text-muted)] text-sm">
-                  No addresses saved.
-                </div>
-              ) : (
-                selectedCustomer.addresses.map((a, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]"
-                  >
-                    <MapPin className="w-4 h-4 text-[var(--accent)] mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <div className="text-[12px] text-[var(--text)]">{a.address_text}</div>
-                      {(a.is_default || a.is_primary) && (
-                        <Pill color="teal" >Default</Pill>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-              <button className="erp-btn-secondary w-full mt-2">
-                <Plus className="w-3.5 h-3.5" />
-                Add Address
-              </button>
-            </div>
-          )}
-
-          {/* ── TAB: Notes & Testers ─────────────────────────────────────── */}
-          {activeTab === "notes" && (
-            <div className="space-y-4">
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">
-                  Customer Notes
-                </div>
-                <div className="p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-[12px] text-[var(--text-muted)] italic">
-                  No notes yet &#8212; add observations about this customer here.
-                </div>
-                <button className="erp-btn-secondary mt-2">
-                  <Plus className="w-3.5 h-3.5" />
-                  Add Note
-                </button>
-              </div>
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">
-                  Complimentary Tester History
-                </div>
-                <div className="p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-[12px] text-[var(--text-muted)] italic">
-                  No complimentary testers recorded for this customer.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB: Risk History ─────────────────────────────────────────── */}
-          {activeTab === "risk" && (
-            <div className="space-y-3">
-              <div className={`flex items-center gap-2 p-3 rounded-lg border ${selectedStats.isRisk ? "border-[var(--status-red)]/30 bg-[var(--status-red)]/5" : "border-[var(--border)] bg-[var(--surface-sunken)]"}`}>
-                {selectedStats.isRisk ? (
-                  <AlertTriangle className="w-4 h-4 text-[var(--status-red)] shrink-0" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4 text-[var(--status-green)] shrink-0" />
-                )}
-                <div className="text-[12px] font-semibold text-[var(--text)]">
-                  {selectedStats.isRisk
-                    ? "This customer has a high RTO / cancellation rate. Use caution for COD orders."
-                    : "No risk flags \u2014 this customer has a good delivery track record."}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div className="p-3 rounded-lg border border-[var(--border)] text-center">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">RTO Count</div>
-                  <div className={`text-xl font-bold font-num ${selectedStats.rto > 0 ? "text-[var(--status-red)]" : "text-[var(--text)]"}`}>{selectedStats.rto}</div>
-                </div>
-                <div className="p-3 rounded-lg border border-[var(--border)] text-center">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Cancelled</div>
-                  <div className={`text-xl font-bold font-num ${selectedStats.cancelled > 0 ? "text-[var(--status-amber)]" : "text-[var(--text)]"}`}>{selectedStats.cancelled}</div>
-                </div>
-                <div className="p-3 rounded-lg border border-[var(--border)] text-center">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Success Rate</div>
-                  <div className={`text-xl font-bold font-num ${selectedStats.successRate && selectedStats.successRate >= 70 ? "text-[var(--status-green)]" : "text-[var(--status-red)]"}`}>
-                    {selectedStats.successRate !== null ? `${selectedStats.successRate}%` : "\u2014"}
-                  </div>
-                </div>
-              </div>
-
-              {selectedStats.rto > 0 && (
-                <div className="p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">RTO Orders</div>
-                  {selectedStats.custOrders
-                    .filter((o) => o.status === "returned")
-                    .map((o) => (
-                      <div key={o.id} className="text-[11px] text-[var(--text)] py-1 border-b border-[var(--border)] last:border-0">
-                        <span className="font-num font-semibold text-[var(--accent)]">{o.invoice_number}</span>
-                        <span className="text-[var(--text-muted)] ml-2">
-                          {new Date(o.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                        </span>
-                        <span className="ml-2">&#2547;{o.total.toLocaleString()}</span>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          )}
-        </Modal>
-      )}
     </div>
   );
 };

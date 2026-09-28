@@ -36,6 +36,8 @@ import { PurchaseOrdersView } from './components/purchasing/PurchaseOrdersView';
 import { PurchaseReturnsView } from './components/purchasing/PurchaseReturnsView';
 import { CustomerReturnsView } from './components/returns/CustomerReturnsView';
 import { CustomersView } from './components/customers/CustomersView';
+import { CustomerProfileView } from './components/customers/CustomerProfileView';
+import { SupplierProfileView } from './components/purchasing/SupplierProfileView';
 import { JournalView } from './components/accounting/JournalView';
 import { DailyCashTillView } from './components/accounting/DailyCashTillView';
 import { CashierDailyClosingView } from './components/accounting/CashierDailyClosingView';
@@ -56,7 +58,6 @@ import { PaymentsView } from './components/accounting/PaymentsView';
 import { PayableReceivableView } from './components/accounting/PayableReceivableView';
 import { ReconciliationView } from './components/accounting/ReconciliationView';
 import { SalesPaymentsAccountingView } from './components/accounting/SalesPaymentsAccountingView';
-import { CRMManagementView } from './components/crm/CRMManagementView';
 import { ShieldAlert } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -219,21 +220,10 @@ const MainLayout: React.FC = () => {
         return <ReconciliationView />;
       case '/accounting/payable-receivable':
         return <PayableReceivableView />;
-      case '/crm':
-      case '/crm/dashboard':
-        return <CRMManagementView initialTab="dashboard" />;
-      case '/crm/leads':
-        return <CRMManagementView initialTab="leads" />;
-      case '/crm/tasks':
-        return <CRMManagementView initialTab="tasks" />;
-      case '/crm/customers':
-        return <CRMManagementView initialTab="customer360" />;
-      case '/crm/segments':
-        return <CRMManagementView initialTab="segments" />;
-      case '/crm/interactions':
-        return <CRMManagementView initialTab="interactions" />;
-      case '/crm/automations':
-        return <CRMManagementView initialTab="automations" />;
+      case '/customers/profile':
+        return <CustomerProfileView />;
+      case '/purchasing/suppliers/profile':
+        return <SupplierProfileView />;
       case '/pricing':
       case '/pricing/engine':
       case '/pricing/market':

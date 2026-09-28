@@ -3,7 +3,9 @@ import ReactDOMServer from 'react-dom/server';
 import { ThemeProvider } from '../src/context/ThemeContext';
 import { AuthProvider } from '../src/context/AuthContext';
 import { AppProvider } from '../src/context/AppContext';
-import { CRMManagementView } from '../src/components/crm/CRMManagementView';
+import { CustomersView } from '../src/components/customers/CustomersView';
+import { CustomerProfileView } from '../src/components/customers/CustomerProfileView';
+import { SupplierProfileView } from '../src/components/purchasing/SupplierProfileView';
 import { JournalView } from '../src/components/accounting/JournalView';
 import { IncomeView } from '../src/components/accounting/IncomeView';
 import { ExpensesView } from '../src/components/accounting/ExpensesView';
@@ -14,13 +16,9 @@ import { PayableReceivableView } from '../src/components/accounting/PayableRecei
 import { FinancialReportsView } from '../src/components/accounting/FinancialReportsView';
 
 const views = [
-  { name: 'CRM - Dashboard', el: <CRMManagementView initialTab="dashboard" /> },
-  { name: 'CRM - Leads', el: <CRMManagementView initialTab="leads" /> },
-  { name: 'CRM - Tasks', el: <CRMManagementView initialTab="tasks" /> },
-  { name: 'CRM - Customers', el: <CRMManagementView initialTab="customer360" /> },
-  { name: 'CRM - Segments', el: <CRMManagementView initialTab="segments" /> },
-  { name: 'CRM - Interactions', el: <CRMManagementView initialTab="interactions" /> },
-  { name: 'CRM - Automations', el: <CRMManagementView initialTab="automations" /> },
+  { name: 'Contacts - Customers', el: <CustomersView /> },
+  { name: 'Contacts - Customer Profile', el: <CustomerProfileView /> },
+  { name: 'Contacts - Supplier Profile', el: <SupplierProfileView /> },
   { name: 'Accounting - Journal', el: <JournalView /> },
   { name: 'Accounting - Income', el: <IncomeView /> },
   { name: 'Accounting - Expenses', el: <ExpensesView /> },

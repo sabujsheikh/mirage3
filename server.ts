@@ -1770,13 +1770,100 @@ async function startServer() {
 
   // 6. Customers
   app.get('/api/customers', (req, res) => {
-    res.json(Array.from(db.customers.values()));
+    const page = Number(req.query.page);
+    const pageSize = Number(req.query.page_size);
+    const isPaged = Number.isFinite(page) || Number.isFinite(pageSize) || req.query.type || req.query.search;
+
+    const allCustomers = Array.from(db.customers.values());
+    if (!isPaged) {
+      return res.json(allCustomers);
+    }
+
+    const typeFilter = req.query.type as string; // 'all' | 'retail' | 'wholesale'
+    const search = (req.query.search as string || '').toLowerCase();
+    const cityFilter = req.query.city as string;
+    const ratingFilter = req.query.rating ? Number(req.query.rating) : undefined;
+
+    let filtered = allCustomers.filter(c => {
+      const effType = db.getEffectiveCustomerType(c);
+      if (typeFilter && typeFilter !== 'all' && effType !== typeFilter) return false;
+      if (cityFilter && cityFilter !== 'all' && c.city !== cityFilter) return false;
+      if (ratingFilter !== undefined && Math.round(c.rating || 0) !== ratingFilter) return false;
+      if (search) {
+        const hay = [c.name, c.phone, c.business_name, c.city, ...(c.addresses || []).map(a => a.address_text)].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(search)) return false;
+      }
+      return true;
+    });
+
+    const total = filtered.length;
+    const curPage = Number.isFinite(page) && page > 0 ? page : 1;
+    const curSize = Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 25;
+    const totalPages = Math.ceil(total / curSize) || 1;
+    const paginatedItems = filtered.slice((curPage - 1) * curSize, curPage * curSize);
+
+    res.json({
+      items: paginatedItems,
+      total,
+      page: curPage,
+      page_size: curSize,
+      total_pages: totalPages,
+    });
   });
 
   app.get('/api/customers/:id', (req, res) => {
     const cust = db.customers.get(req.params.id);
     if (!cust) return res.status(404).json({ error: 'Customer not found' });
     res.json(cust);
+  });
+
+  app.put('/api/customers/:id/type', (req, res) => {
+    try {
+      const { customer_type, business_name, actor_id, actor_name } = req.body;
+      const cust = db.customers.get(req.params.id);
+      if (!cust) return res.status(404).json({ error: 'Customer not found' });
+      const oldState = { ...cust };
+      cust.customer_type = customer_type || undefined;
+      if (business_name !== undefined) cust.business_name = business_name;
+      db.customers.set(cust.id, cust);
+      db.logAudit(
+        actor_id || 'usr_mgr',
+        actor_name || 'Manager',
+        'UPDATE_CUSTOMER_TYPE',
+        'customer',
+        cust.id,
+        `Updated customer type to ${customer_type || 'auto'}`
+      );
+      res.json(cust);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/customers/:id/rating', (req, res) => {
+    try {
+      const { rating, actor_id, actor_name } = req.body;
+      const numRating = Number(rating);
+      if (isNaN(numRating) || numRating < 1 || numRating > 5) {
+        return res.status(400).json({ error: 'Rating must be between 1 and 5' });
+      }
+      const cust = db.customers.get(req.params.id);
+      if (!cust) return res.status(404).json({ error: 'Customer not found' });
+      const oldState = { ...cust };
+      cust.rating = numRating;
+      db.customers.set(cust.id, cust);
+      db.logAudit(
+        actor_id || 'usr_mgr',
+        actor_name || 'Manager',
+        'UPDATE_CUSTOMER_RATING',
+        'customer',
+        cust.id,
+        `Updated customer rating to ${numRating}`
+      );
+      res.json(cust);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   // 7. Phase 3 Purchasing: Suppliers, Purchase Orders, and Purchase Returns (Section 13, 14, 15, 40.3)
